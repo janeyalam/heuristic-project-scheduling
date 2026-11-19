@@ -1,0 +1,7 @@
+task_id,worker_id,start_day,finish_day
+T01,1,0,2
+T02,1,2,6
+T03,2,2,5
+T04,2,5,8
+T05,1,8,10
+T06,1,10,11

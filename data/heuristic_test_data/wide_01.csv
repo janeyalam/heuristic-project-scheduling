@@ -1,0 +1,10 @@
+task_id,duration,depends_on,workers_required
+T01,5,None,1
+T02,5,T01,1
+T03,4,T01,2
+T04,5,T01,1
+T05,2,T01,1
+T06,4,T01,1
+T07,2,T01,1
+T08,4,T01,2
+T09,2,"T02, T03, T04, T05, T06, T07, T08",2

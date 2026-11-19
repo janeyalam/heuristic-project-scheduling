@@ -1,0 +1,105 @@
+# CS-7375 — AI-Based Project Scheduling Using Graph Search and Heuristic Algorithms
+
+This project schedules a **six-task workforce-training onboarding pilot** (T01–T06, two workers) and compares four search algorithms: BFS, UCS, Greedy Best-First and A*. The best schedule finishes in 11 working days.
+
+**Team:** JA (Software Engineering / Search), SB (Computer Science / AI), SS (Business Development), JC (Testing / Visualization; provisional).
+
+## Quick start
+
+With Python 3.10+ installed, open a terminal in this directory and run:
+
+```bash
+python demo.py                    # four algorithms side by side on tasks.csv
+python -m unittest discover -v    # all Phase 1 and Phase 2 tests
+```
+
+On Windows use `python` (or `py`). On macOS and Linux use `python3` instead of `python`. More commands are in [Start here](#start-here) and [Phase 2](#phase-2--search-algorithms).
+## Files
+
+| File | Owner | Use |
+|---|---|---|
+| `Project_Requirements.md` | SS | Project requirements (source of truth) |
+| `Phase2_Requirements.md` | Team | Phase 2 objectives, task assignments and algorithm requirements |
+| `Project_Structure.md` | Team | How the files connect and how data flows from `tasks.csv` to `comparison.csv` |
+| `Data_Validation.md` | Team | Details of the input validation rules |
+| `tasks.csv` | SB handoff | SS tasks transformed into agreed four-column CSV |
+| `data_validation.py` | SB handoff | Schema, dependency, duration and resource validation |
+| `Scheduling_Model.md` | JA | Definitions and expected model behavior |
+| `scheduling_model.py` | JA | Phase 1 state/transition implementation (not BFS/A*) |
+| `reference_schedule.csv` | SS/JC handoff | SS reference schedule in machine-readable form |
+| `test_phase1.py` | JC/JA | Phase 1 automated tests |
+| `search_common.py`, `heuristics.py` | Shared | Shared search helpers (input checks, timeout, schedule validation) and heuristics |
+| `bfs.py`, `ucs.py`, `greedy.py`, `astar.py` | JA | The four search algorithms |
+| `results_io.py`, `comparison.py` | Shared | Results CSV reader/writer and the six-scenario comparison |
+| `comparison.csv` | JC / JA | Generated comparison results (24 rows) |
+| `demo.py` | Shared | Short side-by-side demo of the four algorithms |
+| `test_search.py` | JC / JA | Phase 2 automated tests (unit and property tests) |
+
+**All scenarios are synthetic. No employer data is used.**
+
+## Start here
+
+With Python 3.10+ installed, open a terminal in this directory and run:
+
+```bash
+python data_validation.py tasks.csv --workers 2
+python scheduling_model.py tasks.csv --workers 2
+python -m unittest -v test_phase1
+```
+
+On Windows use `python` (or `py`). On macOS and Linux use `python3` instead of `python`.
+
+The reference schedule should finish in 11 working days using two workers. Changing capacity to 1 or 3 is a sensitivity study; the supplied reference schedule has exactly two assigned workers, so the default reference tracer is shown only at capacity 2.
+
+The CSV file has **four columns exactly as SS requested**: `task_id`, `duration`, `depends_on`, `workers_required`. Any other header is rejected by `data_validation.py`.
+
+## Current boundaries
+
+- State models *interchangeable worker capacity*, not individually skilled employee assignment.
+- Only deterministic, integer-duration, non-preemptive activities with finish-to-start dependencies.
+- `validate_schedule()` verifies feasibility but does **not** find optimal schedules.
+- Phase 2 adds the four search algorithms; see the section below.
+
+## Phase 2 — Search algorithms
+
+Phase 2 finds schedules in the Phase 1 state model with four algorithms. The successor generator does not force every eligible task to start, so waiting is a legal choice and the optimality claims hold.
+
+| Algorithm | File | Behavior |
+|---|---|---|
+| Breadth-First Search | `bfs.py` | Fewest transitions; not guaranteed to minimize days |
+| Uniform-Cost Search | `ucs.py` | Minimum makespan |
+| Greedy Best-First | `greedy.py` | Guided by a heuristic only; fast, not guaranteed optimal |
+| A* | `astar.py` | Minimum makespan with an admissible heuristic |
+
+Each search returns a result with `status` (`solved`, `no solution`, `timeout` or `invalid input`), `makespan`, `schedule`, `states_explored`, `execution_time_ms` and `schedule_valid`. An invalid schedule is never reported as solved.
+
+### Run it
+
+```bash
+python demo.py                         # four algorithms side by side on tasks.csv
+python demo.py --workers 1             # try 1 or 3 workers
+python comparison.py --output comparison.csv   # six scenarios x four algorithms
+python -m unittest discover -v         # all Phase 1 and Phase 2 tests
+```
+
+`comparison.py` stops with exit code 1 and writes nothing if UCS ever returns a larger makespan than another algorithm.
+
+### Comparison analysis
+
+Results from `comparison.csv` (makespan in days; states explored in parentheses):
+
+| Scenario | BFS | UCS | Greedy | A* |
+|---|---|---|---|---|
+| baseline, 2 workers | 12 (15) | 11 (15) | 12 (5) | 11 (15) |
+| baseline, 1 worker | 15 (10) | 15 (10) | 15 (6) | 15 (10) |
+| baseline, 3 workers | 12 (15) | 9 (15) | 9 (5) | 9 (15) |
+| baseline, T05 = 3 days | 13 (15) | 12 (15) | 13 (9) | 12 (15) |
+| independent tasks | 6 (42) | 5 (37) | 5 (3) | 5 (37) |
+| dependency chain | 8 (4) | 8 (4) | 8 (4) | 8 (4) |
+
+- **UCS and A* are optimal.** They return the same makespan in every scenario, and it matches the reference values (11, 15, 9, 12 for the four baseline scenarios). `comparison.py` also checks that UCS is never beaten.
+- **BFS is not optimal.** It minimizes the number of transitions, not days, so it is longer than UCS in four of six scenarios (by 1 to 3 days).
+- **Greedy is fast but unreliable.** It explores the fewest states in every scenario that has choices, and it found the optimum in four of six (1 worker, 3 workers, independent tasks, dependency chain). It returned a longer schedule in the 2-worker and T05 = 3 scenarios, so its answer depends on the instance.
+- **A* did not save work here.** It explored exactly as many states as UCS in every scenario. These instances have at most six tasks, so there is little for the heuristic to prune. The saving would show on larger inputs; this data does not demonstrate it.
+- **One worker or a dependency chain gives every algorithm the same makespan.** With one worker, tasks run one at a time and the worker is never idle while a task is ready, so the makespan is the sum of the durations (15 days) whatever the order. Different orders only change individual start and finish days. A strict chain allows only one order.
+- **Limits of this data.** Each result is a single run on tiny instances. `execution_time_ms` is well under a few milliseconds and varies between runs, so it is not a reliable basis for ranking the algorithms. The state counts are deterministic and are the more useful comparison.

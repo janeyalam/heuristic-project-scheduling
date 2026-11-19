@@ -1,0 +1,226 @@
+# CS-7375 — Phase 2 Requirements
+
+**Project:** AI-Based Intelligent Project Scheduling and Resource Optimization Using Graph Search and Heuristic Algorithms  
+**Phase:** 2 — AI Search Algorithm Implementation  
+**Team:** JA (Software Engineering / Search), SB (Computer Science / AI), SS (Business Development), JC (Testing / Visualization; provisional)  
+**Baseline:** SS's fictional workforce-training onboarding pilot (`Project_Requirements.md`)
+
+## 1. Phase 2 objectives
+
+Implement **Breadth-First Search (BFS), Uniform-Cost Search (UCS), Greedy Best-First Search, and A\*** using the scheduling model built in Phase 1.
+
+By the end of Phase 2, the system should be able to:
+
+1. Read and use the validated project dataset from Phase 1.
+2. Generate valid scheduling states using the existing transition functions.
+3. Implement all four AI search algorithms.
+4. Find a complete project schedule using each algorithm.
+5. Calculate task start times, finish times, and total project completion time (**makespan**).
+6. Compare algorithms using makespan, states explored, and execution time.
+7. Verify that schedules satisfy task dependencies and resource constraints.
+
+These objectives follow the AI search-algorithm comparison in the professor's sample project. This phase is part of the team's implementation plan.
+
+## 2. Phase 1 prerequisites
+
+| Phase 1 deliverable | Owner | Needed for Phase 2 |
+|---|---|---|
+| `Project_Requirements.md` | SS | Defines the scheduling problem and baseline assumptions |
+| `tasks.csv` | SB | Task durations, dependencies, and worker requirements |
+| `data_validation.py` | SB | Validates inputs |
+| `Scheduling_Model.md` | JA | Defines states, actions, transitions, costs, and goals |
+| `scheduling_model.py` | JA | Generates valid successor states |
+| `test_phase1.py` | JC / JA | Verifies scheduling constraints |
+
+### Official baseline
+
+- **Project:** SS's six-task workforce-training onboarding pilot (T01–T06)
+- **Resources:** Two interchangeable coordinators
+- **Durations:** Fixed, in whole working days
+- **Dependencies:** Finish-to-start
+- **Expected optimal makespan:** **11 working days**
+
+All four search algorithms must use the **same tasks, dependencies, resource limits, goal test, and transition rules**. Only the search strategy should change.
+
+## 3. Phase 2 task assignments
+
+| Task ID | Requirement / Task | Owner | Deliverable |
+|---|---|---|---|
+| **P2.1** | Implement Breadth-First Search | **JA** | `bfs.py` |
+| **P2.2** | Implement Uniform-Cost Search | **JA** | `ucs.py` |
+| **P2.3** | Implement Greedy Best-First Search | **JA** | `greedy.py` |
+| **P2.4** | Implement A* Search | **JA** | `astar.py` |
+| **P2.5** | Prepare common test datasets for all algorithms | **SB** | `search_test_data/` |
+| **P2.6** | Define additional scheduling scenarios | **SS** | `Scheduling_Scenarios.md` |
+| **P2.7** | Test schedules and compare algorithms | **JC, JA** | `test_search.py`, `comparison.csv` |
+| **P2.8** | Integrate and review the components | **All** | Working Phase 2 search engine |
+
+## 4. JA's algorithm requirements
+
+### P2.1 — Breadth-First Search (BFS)
+
+- Use a **FIFO queue** to explore scheduling states level by level.
+- Find a complete, valid schedule with the fewest **search transitions** in the modeled state graph.
+- **Do not claim** BFS minimizes makespan: transitions may advance different amounts of working time.
+- Return the schedule, completion time, expanded-state count, and execution time.
+
+**Deliverable:** `bfs.py`
+
+### P2.2 — Uniform-Cost Search (UCS)
+
+- Use a **priority queue** ordered by cumulative elapsed time, **g(n)**.
+- Use elapsed working days as transition costs.
+- Track the best-known cost for each state and update it when a cheaper route is found.
+- Under a correct and complete search model with nonnegative transition costs, UCS should find a minimum-duration schedule.
+- Return the schedule, makespan, expanded-state count, and execution time.
+
+**Deliverable:** `ucs.py`
+
+### P2.3 — Greedy Best-First Search
+
+- Use a **priority queue** ordered by estimated remaining time, **h(n)**.
+- Begin with a simple heuristic, such as the longest remaining individual task duration (accounting for any already-running tasks).
+- Recognize that Greedy may reach a solution quickly without guaranteeing optimal makespan.
+- Return the schedule, makespan, expanded-state count, and execution time.
+
+**Deliverable:** `greedy.py`
+
+### P2.4 — A* Search
+
+- Use the evaluation function:
+
+  \[
+  f(n) = g(n) + h(n)
+  \]
+
+  where **g(n)** is elapsed time and **h(n)** estimates the remaining time.
+
+- Begin with an **admissible** heuristic; **h(n) = 0** is the initial baseline and makes A* equivalent to UCS in search priority.
+- Track best-known costs and support improved paths to previously encountered states.
+- Verify that A* produces the same optimal makespan as UCS on the small baseline when the heuristic is admissible.
+- More informative, scheduling-aware heuristics belong to **Phase 3**.
+- Return the schedule, makespan, expanded-state count, and execution time.
+
+**Deliverable:** `astar.py`
+
+## 5. Common technical requirements
+
+| ID | Requirement |
+|---|---|
+| TR-01 | Use the validated Phase 1 task dataset. |
+| TR-02 | Use the same initial state and goal test for all algorithms. |
+| TR-03 | Generate successor states through `scheduling_model.py`. |
+| TR-04 | Do not start tasks until all dependencies are complete. |
+| TR-05 | Never exceed worker capacity. |
+| TR-06 | Never start or complete the same task more than once. |
+| TR-07 | Track running tasks and their remaining durations. |
+| TR-08 | Calculate transition costs from elapsed working days. |
+| TR-09 | Track visited states and/or best-known costs appropriately for each algorithm. |
+| TR-10 | Reconstruct the complete task schedule from the search result. |
+| TR-11 | Count expanded states and measure execution time consistently. |
+| TR-12 | Report unsolvable inputs and search timeouts explicitly; never output an invalid schedule as a success. |
+
+**Modeling note:** The successor generator must allow the scheduling choices required for a valid optimality claim. In particular, it should not *automatically* force all eligible tasks to start simply because workers are free. Delaying a task can matter in more complex resource-constrained scheduling instances.
+
+## 6. Standard algorithm output
+
+Each algorithm must return results in a common structure, for example:
+
+```python
+{
+    "algorithm": "A*",
+    "makespan": 11,
+    "schedule": [
+        # Each entry: task_id, start_time, finish_time
+    ],
+    "states_explored": 0,
+    "execution_time_ms": 0.0,
+    "schedule_valid": True,
+}
+```
+
+**Note:** `makespan = 11` is the proven optimum for SS's baseline. `states_explored = 0` and `execution_time_ms = 0.0` are **placeholders**, not experimental results.
+
+### Comparison table template
+
+| Algorithm | Makespan | Expanded states | Runtime | Valid? |
+|---|---:|---:|---:|---|
+| BFS | To measure | To measure | To measure | To verify |
+| UCS | **11 expected** | To measure | To measure | To verify |
+| Greedy Best-First | To measure | To measure | To measure | To verify |
+| A* with admissible heuristic | **11 expected** | To measure | To measure | To verify |
+
+The time and state counts must come from actual runs of the Python implementation.
+
+## 7. Phase 2 test requirements
+
+| Test case | Expected outcome |
+|---|---|
+| Six-task baseline, **two workers** | UCS and admissible A* return **11 days**. |
+| **One worker** | Minimum makespan is **15 days**. |
+| **Three workers** | Minimum makespan is **9 days**. |
+| T05 rehearsal duration increases from **2 to 3 days** with two workers | Minimum makespan is **12 days**. |
+| All tasks independent | Schedule still respects resource capacity. |
+| All tasks form a dependency chain | Tasks execute in prerequisite order. |
+| A task needs more workers than total available | Input is rejected as infeasible. |
+| No valid solution | Search reports failure, without returning an invalid schedule. |
+
+The first four reference values come from SS's six-task requirements and suggested business refinements. The other cases check general algorithm and model behavior.
+
+## 8. Handoff to Phase 3
+
+Phase 2 verifies the four search algorithms using a basic heuristic. **Phase 3** will implement and compare stronger heuristics, including remaining critical-path and resource-workload lower bounds.
+
+```mermaid
+flowchart TD
+    A["Phase 1: Validated Scheduling Model"]
+    B["Phase 2: BFS"]
+    C["Phase 2: UCS"]
+    D["Phase 2: Greedy Best-First"]
+    E["Phase 2: A*"]
+    F["Compare Algorithms and Validate Results"]
+    G["Phase 3: Improved Scheduling Heuristics"]
+    A --> B
+    A --> C
+    A --> D
+    A --> E
+    B --> F
+    C --> F
+    D --> F
+    E --> F
+    F --> G
+```
+
+## 9. Phase 2 completion checklist
+
+- [ ] **P2.1 — JA:** BFS implementation complete (`bfs.py`).
+- [ ] **P2.2 — JA:** UCS implementation complete (`ucs.py`).
+- [ ] **P2.3 — JA:** Greedy Best-First implementation complete (`greedy.py`).
+- [ ] **P2.4 — JA:** A* implementation complete (`astar.py`).
+- [ ] **P2.5 — SB:** Shared test datasets prepared (`search_test_data/`).
+- [ ] **P2.6 — SS:** Scheduling scenarios documented (`Scheduling_Scenarios.md`).
+- [ ] **P2.7 — JC/JA:** Algorithm tests and comparison completed (`test_search.py`, `comparison.csv`).
+- [ ] **P2.8 — All:** Integrated search engine reviewed and working.
+
+## 10. JA's recommended implementation order
+
+1. Confirm that `scheduling_model.py` reliably exposes:
+
+   ```python
+   initial_state()
+   successors(state)
+   is_goal(state)
+   ```
+
+   Each successor should provide the next state, elapsed transition cost, and enough action information to reconstruct the final schedule. Adapt the exact function signatures to the Phase 1 implementation.
+
+2. Implement **BFS** and confirm it returns a *valid* schedule.
+3. Implement **UCS** and verify the **11-day** baseline minimum.
+4. Implement **Greedy Best-First Search** with a simple heuristic.
+5. Implement **A***, initially with `h(n) = 0`, and verify the **11-day** baseline minimum.
+6. Run all four algorithms on the same scenarios, record metrics, and review the comparison with JC.
+7. Complete integration and hand the working search engine to **Phase 3**.
+
+### Immediate milestone
+
+**Implement BFS and UCS on SS's six-task dataset, verify that both generate valid schedules, and confirm that UCS finds the 11-day minimum makespan.**

@@ -1,0 +1,323 @@
+# CS-7375 — Phase 3 Requirements
+
+**Project:** AI-Based Intelligent Project Scheduling and Resource Optimization Using Graph Search and Heuristic Algorithms  
+**Phase:** 3 — Heuristic Design, Testing, and Search-Efficiency Comparison  
+**Team:** JA (search/model), SB (AI/data), SS (business requirements), JC (testing/visualization)  
+**Status:** Planned; complete the Phase 2 search engine before running Phase 3 comparisons  
+**Baseline:** SS's fictional six-task workforce-training onboarding pilot (T01–T06)
+
+> **Scope note:** This is our team's Phase 3 implementation plan, not a separate set of instructions issued by the professor. The professor's sample project calls for comparison of simple and informed heuristics; our scheduling-specific definitions below implement that idea. Machine learning is reserved for the later optional extension.
+
+## 1. Purpose and research question
+
+Phase 2 implements BFS, Uniform-Cost Search (UCS), Greedy Best-First Search, and A* against a common scheduling state-space model. In **Phase 3**, we will improve the heuristic used by Greedy and A*, and test whether a better estimate of remaining project time reduces search effort.
+
+**Main question:** Can a heuristic that considers task dependencies and available workers reduce the number of scheduling states explored while preserving the minimum project completion time when used with A*?
+
+Secondary questions:
+
+- How much does a critical-path bound improve on a basic unfinished-task estimate?
+- Does adding a workload/resource bound improve search efficiency further?
+- Does the improvement change when the worker capacity, durations, or project size changes?
+- When does Greedy Best-First Search produce a faster but longer schedule?
+
+The primary project objective remains **minimum makespan**, measured in whole working days. We do not introduce cost, revenue, or employee skills into the optimization objective in this phase.
+
+## 2. Required Phase 2 inputs
+
+| Required input | Owner | What Phase 3 needs |
+|---|---|---|
+| `Project_Requirements_SS.md` | SS | Business rules and baseline task dependencies |
+| `tasks.csv` | SB | Six baseline tasks with duration, predecessors, and worker needs |
+| `data_validation.py` | SB | Validation of task IDs, durations, cycles, and worker capacity |
+| `Scheduling_Model.md` | JA | Definition of states, scheduling transitions, goals, and costs |
+| `scheduling_model.py` | JA | `initial_state()`, `successors()`, `is_goal()` and immutable states |
+| `ucs.py` | JA | Exact minimum-makespan reference on small instances |
+| `greedy.py`, `astar.py` | JA | Accept an injected heuristic function `h(state, tasks, capacity)` |
+| `test_search.py` | JC/JA | Phase 2 tests demonstrating valid schedules and comparable metrics |
+
+**Entry criteria:**
+
+- [ ] All Phase 1 validation tests pass.
+- [ ] BFS, UCS, Greedy, and A* can each produce a valid schedule for the same baseline data.
+- [ ] UCS finds the **11-day** optimum for SS's six-task, two-worker baseline.
+- [ ] A* with `h(n) = 0` also finds the 11-day optimum.
+- [ ] The algorithms return schedule, makespan, expanded states, and runtime in a common result format.
+- [ ] A known-invalid schedule is rejected, and an impossible input is reported clearly.
+
+If any entry criterion fails, fix the Phase 1/2 implementation before attributing differences to heuristics.
+
+## 3. Shared model and notation
+
+This phase uses the same deterministic event-driven model as Phase 1:
+
+```python
+@dataclass(frozen=True)
+class State:
+    completed: frozenset[str]
+    running: tuple[tuple[str, int], ...]  # (task_id, remaining_days)
+```
+
+Each task has a positive integer duration, a set of finish-to-start predecessors, and a worker requirement. `capacity` is the total number of interchangeable workers. A running task cannot be interrupted. The next transition advances time to the next task completion, and **the transition cost equals the number of elapsed working days**.
+
+Define:
+
+- `U(n)`: all tasks that are **not yet completed**, including currently running tasks.
+- `r_i(n)`: task `i`'s **remaining** duration: `0` if completed, remaining days if running, or its full duration if not started.
+- `w_i`: worker demand of task `i`.
+- `R`: total interchangeable worker capacity.
+- `g(n)`: elapsed days already incurred along the search path.
+- `h(n)`: estimated minimum remaining days until all tasks finish.
+
+At a completed goal, **every heuristic must return zero**.
+
+### Important rule: account for partially completed work
+
+If task T02 originally takes four days but has one day left, its remaining duration is **1**, not 4. Using the original duration in the resource bound or critical path at that state could overestimate remaining time and break admissibility.
+
+## 4. Heuristics to implement
+
+### H0 — Zero heuristic (control)
+
+\[
+h_0(n)=0
+\]
+
+This is the simplest admissible heuristic. A* with `h0` behaves like UCS with respect to its cost priority, apart from possible tie-breaking differences. Use it as the baseline for an A* comparison.
+
+### H1 — Longest remaining individual task (simple heuristic)
+
+\[
+h_1(n)=\max_{i\in U(n)} r_i(n)
+\]
+
+Since no task can finish before its own remaining work is done, this never overestimates the minimum time left. Return `0` when there are no unfinished tasks.
+
+**Example:** If the remaining durations of unfinished tasks are 4, 3, and 2 days, `h1 = 4` days.
+
+### H2 — Remaining critical-path bound (dependency-aware)
+
+Use the longest remaining chain of dependent tasks. Within each unfinished task's path, use `r_i(n)`, not its original duration if it is already running.
+
+For an unfinished task `i`, define its downstream bound:
+
+\[
+L(i,n)=r_i(n)+\max_{j\in Succ(i)\cap U(n)}L(j,n),
+\]
+
+where the maximum of an empty set is zero and `Succ(i)` is the set of tasks that directly depend on `i`. Then:
+
+\[
+h_{CP}(n)=\max_{i\in U(n)}L(i,n)
+\]
+
+The `depends_on` graph must be acyclic, as enforced by the data validator. Dependencies force the tasks along any one chain to run sequentially, so this is a lower bound on the remaining makespan. For computational efficiency, memoize `L` within each call.
+
+### H3 — Critical path + worker-workload bound (resource-aware)
+
+All remaining tasks require a certain amount of worker time. Even with ideal parallelism, the remaining calendar time cannot be shorter than the available worker capacity allows:
+
+\[
+h_W(n)=\left\lceil\frac{\sum_{i\in U(n)} w_i\,r_i(n)}{R}\right\rceil
+\]
+
+Combine the two independent lower bounds:
+
+\[
+\boxed{h_3(n)=\max\left(h_{CP}(n),h_W(n)\right)}
+\]
+
+Using the **maximum**, not the sum, is important: some worker effort lies on the critical path and adding both bounds could double-count it. `h3` remains admissible for the defined deterministic model.
+
+> **Proof sketch:** Every unfinished dependency chain must consume its remaining sequential duration, so the actual remaining makespan is at least `hCP`. All unfinished worker-days must be supplied by at most `R` workers per day, so the makespan is at least `hW`. The maximum of two lower bounds is also a lower bound. The same reasoning applies to H1. This assumes the Phase 1 model (fixed positive durations, non-preemption, no release dates, shared worker capacity).
+
+### Baseline values from SS's project
+
+At Day 0, using SS's task durations of 2, 4, 3, 3, 2, and 1 days with two workers:
+
+| Estimate | Value | Reason |
+|---|---:|---|
+| `h0` | 0 | Zero baseline |
+| `h1` | 4 | Longest individual task is T02 |
+| `hCP` | 9 | T01 → T02 → T05 → T06 = 2+4+2+1 |
+| `hW` | 8 | `ceil((2+4+3+3+2+1)/2) = ceil(15/2)` |
+| `h3` | 9 | `max(9, 8)` |
+| Known optimal makespan | 11 | Reference solution in SS's requirements |
+
+The heuristics are **optimistic**: a nine-day lower bound does not mean a feasible nine-day schedule exists with two workers. SS's 11-day schedule is optimal because the three middle tasks (4, 3, and 3 days) need at least six days on two workers, in addition to T01, T05, and T06.
+
+## 5. Implementation requirements (JA and SB)
+
+| ID | Requirement | Acceptance criterion |
+|---|---|---|
+| H-01 | Implement H0 | Returns `0` for all valid states |
+| H-02 | Implement H1 | Uses unfinished or remaining duration, never full original duration for running work |
+| H-03 | Implement critical-path calculation | Correctly follows dependencies and returns an optimistic remaining-time bound |
+| H-04 | Implement worker-workload calculation | Uses demand × remaining duration divided by current constant capacity |
+| H-05 | Combine bounds as H3 | Returns `max(hCP, hW)`, not their sum |
+| H-06 | Verify goal behavior | All heuristics return `0` for completed goals |
+| H-07 | Use a common callable interface | A* and Greedy can swap heuristic implementations without changing `successors()` |
+| H-08 | Keep heuristics side-effect free | Evaluating `h` must not mutate tasks, states, or worker capacity |
+| H-09 | Preserve search correctness | A* supports best-cost updates/reopening when improved paths are found |
+| H-10 | Compare identical scenarios | Same input, algorithm settings, and measurement definitions across heuristic variants |
+| H-11 | Validate results | Every reported schedule passes the existing schedule validator |
+| H-12 | Handle size limits honestly | Record timeouts and explored-state limits as incomplete runs |
+
+### Proposed Python interface
+
+```python
+# heuristics.py
+def h_zero(state, tasks, capacity: int) -> int: ...
+def h_longest_task(state, tasks, capacity: int) -> int: ...
+def h_critical_path(state, tasks, capacity: int) -> int: ...
+def h_workload(state, tasks, capacity: int) -> int: ...
+def h_critical_path_workload(state, tasks, capacity: int) -> int: ...
+```
+
+Phase 2's Greedy and A* entry points should accept a heuristic function, for example:
+
+```python
+result = astar_search(tasks, worker_capacity=2,
+                      heuristic=h_critical_path_workload)
+```
+
+The exact function signatures can be adjusted to the existing Phase 2 implementation, but **all algorithms must use the same scheduling model and state representation**. Do not reimplement scheduling constraints separately in each heuristic.
+
+## 6. Phase 3 tasks, owners, and deliverables
+
+| Task ID | Task | Lead | Support | Deliverable |
+|---|---|---|---|---|
+| **P3.1** | Agree on heuristic definitions and document the math | JA | SB | This document's H0–H3 specification approved by team |
+| **P3.2** | Implement zero and longest-task heuristics | JA | SB | `heuristics.py` — H0, H1 |
+| **P3.3** | Implement remaining critical-path heuristic | JA | SB | `heuristics.py` — H2 |
+| **P3.4** | Implement workload bound and combined H3 | JA | SB | `heuristics.py` — H3 |
+| **P3.5** | Check formulas and create varied synthetic instances | SB | JA | `heuristic_test_data/` and input-generation notes |
+| **P3.6** | Supply staffing/rehearsal comparison scenarios | SS | SB | `Heuristic_Scenarios.md` |
+| **P3.7** | Unit-test admissibility and schedule validity | JC | JA, SB | `test_heuristics.py` |
+| **P3.8** | Run fair search comparisons and record metrics | JC | JA, SB | `heuristic_results.csv` and comparison figures |
+| **P3.9** | Interpret findings and known limits | All | — | `Heuristic_Analysis.md` |
+
+**Ownership:** JA is responsible for the heuristic code and integration with A*/Greedy; SB checks the formulas and prepares test data; SS proposes scheduling scenarios and explains the business meaning; JC manages tests, result tables, and graphs. Everyone reviews the analysis.
+
+## 7. Test requirements
+
+### 7.1 Correctness tests
+
+| Test ID | Test | Expected behavior |
+|---|---|---|
+| HT-01 | Completed goal state | H0, H1, H2, and H3 all return `0` |
+| HT-02 | SS baseline at Day 0 | H0=0, H1=4, H2=9, workload=8, H3=9 |
+| HT-03 | Partial running task | Heuristics use remaining work, e.g., one day rather than original four |
+| HT-04 | All tasks form one dependency chain | Critical-path bound equals the sum of remaining chain durations |
+| HT-05 | Several independent tasks | Workload bound reflects available worker capacity |
+| HT-06 | One available worker | Workload bound equals all remaining worker-days |
+| HT-07 | Invalid input (cycle, bad duration, overcapacity) | Input validation rejects it before heuristic evaluation |
+| HT-08 | Every legal transition | All heuristics are nonnegative; no state mutation |
+| HT-09 | Small reachable-state sample | For each state, `h(state) <= true optimal cost-to-go` computed by UCS |
+| HT-10 | A* on small reference cases | A* with each admissible heuristic matches UCS optimal makespan |
+| HT-11 | Repeated experiment | Fixed input gives the same optimal makespan; runtime may vary |
+
+**Admissibility checks:** Generate all reachable states for the small SS six-task instance (or a well-defined subset when larger instances are used). Starting from each state, run UCS to calculate the exact **remaining** cost; assert `0 <= h(n) <= UCS_cost_to_goal(n)`. This verifies the mathematical assumptions against the implementation for small examples.
+
+**If a test fails:** First check whether running-task remaining times were handled incorrectly, the task dependency graph was read incorrectly, or the algorithm's best-cost/reopening logic is wrong. Do not change the reference answer simply to make the test pass.
+
+### 7.2 Business-refinement tests from SS
+
+| Scenario | Expected optimal makespan | Where it belongs |
+|---|---:|---|
+| SS baseline, one worker | 15 days | Sanity/reference test |
+| SS baseline, two workers | 11 days | Main baseline |
+| SS baseline, three workers | 9 days | Staffing sensitivity test |
+| Two workers, T05 rehearsal extended from two to three days | 12 days | Duration sensitivity test |
+
+These values were supplied in SS's requirements. During Phase 3, compare the heuristics on each scenario; Phase 4 can expand to many generated problems.
+
+**Worker qualifications are not supported yet.** SS's suggestion to give T03 a qualified registration worker or T06 a designated approver requires adding worker identity/skills to the model and is an optional future extension, not an acceptance criterion in Phase 3.
+
+## 8. Search comparisons and measurement rules
+
+At minimum, compare the following runs on the **same instance**:
+
+1. UCS — no heuristic, optimal-cost reference.
+2. A* + H0 — zero-heuristic control.
+3. A* + H1 — longest individual task.
+4. A* + H2 — remaining critical path.
+5. A* + H3 — critical path + workload.
+6. Greedy + H1 and Greedy + H3 — to observe heuristic-guided speed and possible nonoptimal schedules.
+
+Keep BFS results from Phase 2 available as a broader uninformed-search comparison, but the **main Phase 3 experiment concerns heuristics**.
+
+| Metric | Definition |
+|---|---|
+| `makespan_days` | Finish time of the last task in the returned valid schedule |
+| `states_expanded` | Number of states removed from the frontier **and actually expanded**, excluding stale entries |
+| `states_generated` | Number of successor transitions generated during expansion |
+| `runtime_ms` | Wall-clock elapsed time for the search call; exclude CSV parsing and plotting consistently |
+| `solution_valid` | Schedule passes precedence, capacity, duration, and task-completeness checks |
+| `optimality_gap_pct` | `100 × (makespan − known optimum) / known optimum` when the optimum is known |
+| `search_status` | `solved`, `timeout`, `state_limit`, `invalid`, or `no_solution` |
+
+**Interpret results carefully:** If UCS and admissible A* solve the same instance optimally, their **minimum makespan should be equal**. A better admissible heuristic is intended to reduce the search effort; it does not produce a schedule shorter than the optimum. It is possible for H3 to expand no fewer states than H2 on some instances because implementation overhead, duplicate paths, and tie-breaking influence observed performance. Do not promise a speedup.
+
+### Recommended experiment settings
+
+- Use SS's six-task case as a **correctness baseline**.
+- Generate additional synthetic instances (for example 8–12 tasks with different dependency structures), retaining deterministic random seeds. Increase instance size only while exact search is manageable.
+- Run each method under the same timeout and state-expansion limit; record incomplete runs separately.
+- Repeat timing runs (for example five repeats per instance) and summarize median runtime alongside state expansions. Use the same machine and Python environment.
+- Compare both worker capacity and task duration variants as suggested by SS; change **one input factor at a time** for controlled comparisons.
+- Keep the heuristic computation time **inside** the search runtime measurement. Optionally report a separate per-call heuristic cost if it becomes important.
+
+### Proposed results CSV
+
+`heuristic_results.csv` should include at least:
+
+```csv
+scenario_id,seed,task_count,worker_capacity,algorithm,heuristic,search_status,makespan_days,states_expanded,states_generated,runtime_ms,solution_valid,optimality_gap_pct
+```
+
+Do not populate the measured columns with invented results. A failed or timed-out run must not be reported as an optimal solution.
+
+## 9. Phase 3 completion criteria
+
+Phase 3 is **complete** when:
+
+- [ ] H0, H1, H2, and H3 are implemented in `heuristics.py`.
+- [ ] Their assumptions and formulas are documented and understood by JA and SB.
+- [ ] Unit tests cover goal states, partial running work, dependencies, and worker capacity.
+- [ ] Small-state admissibility checks pass against exact UCS remaining costs.
+- [ ] A* with H1, H2, and H3 matches UCS on the SS reference cases.
+- [ ] Greedy and A* run with multiple heuristics without changing the state-space model.
+- [ ] Every returned schedule passes the common schedule validator.
+- [ ] Comparisons have been run on SS's baseline **and additional** synthetic cases.
+- [ ] `heuristic_results.csv` contains reproducible measurements, with clear handling of incomplete runs.
+- [ ] JC has prepared comparison figures and SS has reviewed the business interpretation.
+- [ ] `Heuristic_Analysis.md` explains findings, limitations, and any unexpected results.
+
+## 10. Phase 3 to Phase 4 handoff
+
+| Handoff item | Used for |
+|---|---|
+| `heuristics.py` | Reusable manual heuristics and optional ML-guided search comparison |
+| `test_heuristics.py` | Regression checks when expanding the scheduling model |
+| `heuristic_test_data/` | Repeatable synthetic experiments |
+| `heuristic_results.csv` | Algorithm-performance tables and figures for the research paper |
+| `Heuristic_Analysis.md` | Methods, results discussion, and limitations in the final report |
+
+**Phase 4** adds a wider evaluation across varied synthetic projects and, if feasible, selected PSPLIB instances. If time allows, SB may train an ML model to predict remaining completion time and JA may test its predictions as an experimental search heuristic. **An ML-predicted heuristic can overestimate remaining time**, so do not claim standard A* optimality for it without additional justification.
+
+## 11. Recommended work order for JA
+
+1. Review `scheduling_model.py` and verify the running-task representation and time-advance cost.
+2. Have `astar.py` and `greedy.py` accept a heuristic function argument.
+3. Implement and unit-test H0 and H1.
+4. Implement H2 using the dependency graph and each running task's remaining duration.
+5. Implement H3 by combining critical path with the worker-workload lower bound.
+6. Use UCS to check each heuristic's admissibility on reachable states of the six-task case.
+7. Compare A* H0/H1/H2/H3 on identical tasks and workers; review results with JC.
+8. Confirm staffing/duration experiments with SS and share the finalized heuristic interface with SB.
+
+### Immediate JA milestone
+
+**Create `heuristics.py` with H0, H1, H2, and H3, and verify the Day 0 baseline values of 0, 4, 9, and 9 days before measuring search performance.**
+

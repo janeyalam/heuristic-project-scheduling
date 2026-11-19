@@ -1,0 +1,404 @@
+# Project Structure: how the files connect
+
+This guide shows what each file in the project does, which files use which, and how data moves from `tasks.csv` to `comparison.csv`. For details on one file, follow the links to `Data_Validation.md` and `Scheduling_Model.md`.
+
+## 1. Overview
+
+The project plans a small onboarding pilot with 6 tasks (T01 to T06) and 2 workers. The goal is the fewest working days to finish all tasks. The best possible answer is 11 days.
+
+| Phase | What it builds | Status in the folder |
+|---|---|---|
+| Phase 1 | Reads and checks `tasks.csv`, and models the schedule as states and moves | Files exist, 26 tests pass |
+| Phase 2 | Four search algorithms (BFS, UCS, Greedy, A*) that use the Phase 1 model | Files exist (see section 8) |
+| Phase 3 | Better heuristics, as described in `Phase2_Requirements.md` section 8 | Not started in code. `heuristics.py` already holds some candidates |
+
+## 2. How the files connect
+
+An arrow means "is used by" (the file at the tail is imported or read by the file at the head). Data files are the slanted boxes.
+
+```mermaid
+flowchart LR
+    subgraph Data
+        tasks[/tasks.csv/]
+        ref[/reference_schedule.csv/]
+        out[/comparison.csv/]
+    end
+    subgraph P1[Phase 1]
+        dv[data_validation.py]
+        sm[scheduling_model.py]
+        t1[test_phase1.py]
+    end
+    subgraph P2[Phase 2]
+        sc[search_common.py]
+        he[heuristics.py]
+        bfs[bfs.py]
+        ucs[ucs.py]
+        gr[greedy.py]
+        as[astar.py]
+        rio[results_io.py]
+        cmp[comparison.py]
+    end
+    tasks --> dv
+    tasks --> t1
+    tasks --> cmp
+    ref --> sm
+    ref --> t1
+    dv --> sm
+    dv --> t1
+    sm --> t1
+    dv --> sc
+    sm --> sc
+    dv --> he
+    dv --> cmp
+    sc --> bfs
+    sc --> ucs
+    sc --> gr
+    sc --> as
+    he --> gr
+    he --> as
+    bfs --> cmp
+    ucs --> cmp
+    gr --> cmp
+    as --> cmp
+    rio --> cmp
+    cmp --> out
+```
+
+Notes on the diagram:
+
+- `tasks.csv` is read through `load_tasks` in `data_validation.py`. `test_phase1.py` and `comparison.py` also name the file directly.
+
+## 3. File table
+
+Owners are copied from `README.md` and `Phase2_Requirements.md`. A dash means no owner is written there.
+
+| File | Phase | What it does | Uses | Used by | Owner |
+|---|---|---|---|---|---|
+| `tasks.csv` | Data | The 6 baseline tasks | - | `data_validation.py` (via `load_tasks`), `test_phase1.py`, `comparison.py` | SB handoff |
+| `reference_schedule.csv` | Data | The hand-made 11-day schedule | - | `scheduling_model.py`, `test_phase1.py` | SS/JC handoff |
+| `comparison.csv` | Data | Results of all runs (24 rows) | - | Output of `comparison.py` | JC, JA |
+| `data_validation.py` | 1 | Checks the CSV, builds `Task` objects, computes lower bounds | - | `scheduling_model.py`, `test_phase1.py`, `search_common.py`, `heuristics.py`, `comparison.py` | SB handoff |
+| `scheduling_model.py` | 1 | States, legal moves, goal test, schedule checker | `data_validation.py` | `test_phase1.py`, `search_common.py` | JA |
+| `test_phase1.py` | 1 | 26 automated tests | `data_validation.py`, `scheduling_model.py` | - | JC/JA |
+| `search_common.py` | 2 | The one search loop, result dict, schedule rebuild and check | `data_validation.py`, `scheduling_model.py` | `bfs.py`, `ucs.py`, `greedy.py`, `astar.py` | - |
+| `heuristics.py` | 2 | Estimates of days still needed | `data_validation.py` | `greedy.py`, `astar.py` | - |
+| `bfs.py` | 2 | Breadth-First Search | `search_common.py` | `comparison.py` | JA |
+| `ucs.py` | 2 | Uniform-Cost Search | `search_common.py` | `comparison.py` | JA |
+| `greedy.py` | 2 | Greedy Best-First Search | `search_common.py`, `heuristics.py` | `comparison.py` | JA |
+| `astar.py` | 2 | A* Search | `search_common.py`, `heuristics.py` | `comparison.py` | JA |
+| `results_io.py` | 2 | Writes and reads the results CSV | - | `comparison.py` | - |
+| `comparison.py` | 2 | Runs 4 algorithms on 6 scenarios and writes `comparison.csv` | `astar.py`, `bfs.py`, `greedy.py`, `ucs.py`, `data_validation.py`, `results_io.py` | - | JC, JA (for `comparison.csv`) |
+| `Project_Requirements.md` | Docs | The problem and the 11-day argument | - | - | SS |
+| `Scheduling_Model.md` | Docs | Model definitions | - | - | JA |
+| `Data_Validation.md` | Docs | Guide to `data_validation.py` | - | - | - |
+| `Phase2_Requirements.md` | Docs | Phase 2 tasks and checklist | - | - | - |
+| `README.md` | Docs | Short start guide | - | - | - |
+| `Project_Structure.md` | Docs | This file | - | - | - |
+
+## 4. Data flow, step by step
+
+This follows one run on the baseline: `tasks.csv`, 2 workers.
+
+**Step 1. Read the CSV.** `load_tasks('tasks.csv', 2)` in `data_validation.py` checks every row and returns a dictionary of `Task` objects.
+
+```python
+tasks['T02']   # Task(task_id='T02', duration=4, dependencies=('T01',), workers_required=1)
+```
+
+**Step 2. Start state.** `initial_state()` in `scheduling_model.py` returns a `State` with nothing done and nothing running.
+
+```python
+State(completed=frozenset(), running=())
+```
+
+**Step 3. Moves.** `successors(state, tasks, capacity)` returns every one-step move. Each is a `Successor` with the new state, an `Action` and a cost in days. At the start there is one move, which starts T01 and jumps 2 days.
+
+```python
+Action(started=('T01',), finished=('T01',), elapsed_days=2)   # cost 2
+```
+
+`is_goal(state, tasks)` says when all 6 tasks are finished and nothing is running.
+
+**Step 4. Search loop.** `best_first_search` in `search_common.py` keeps a frontier of states. It takes one state out, tests it with `is_goal`, and otherwise adds its `successors`. It also checks the input first with `check_input`, which calls `validate_tasks`. It counts each state it expands in `states_explored` and measures the time.
+
+**Step 5. The four algorithms.** Each algorithm calls `best_first_search` with a different `priority` and `reopen` setting. Only this choice differs.
+
+| Algorithm | Frontier order | `reopen` |
+|---|---|---|
+| BFS | First in, first out (`bfs.py` passes a constant priority) | `False` |
+| UCS | `g`, the days so far | `True` |
+| Greedy | `h`, from `longest_remaining` | `False` |
+| A* | `g + h`, with `zero_heuristic` by default | `True` |
+
+**Step 6. Rebuild and check the schedule.** When the goal is taken from the frontier, `reconstruct_schedule` turns the list of `Action` objects into start and finish days. `check_schedule` then calls `validate_schedule` from `scheduling_model.py`. If the check fails, the result is not reported as solved.
+
+```python
+{'task_id': 'T03', 'start_time': 2, 'finish_time': 5}
+```
+
+**Step 7. Result dict.** `make_result` builds one dict per run with `algorithm`, `makespan`, `schedule`, `states_explored`, `execution_time_ms`, `schedule_valid`, `status`, `error` and `transitions`.
+
+```python
+BFS solved 12 15 True 5      # algorithm, status, makespan, states_explored, schedule_valid, transitions
+UCS solved 11 15 True 6
+```
+
+**Step 8. Write the CSV.** `comparison.py` copies seven fields from each result and calls `write_results_csv` in `results_io.py`. The output is `comparison.csv`:
+
+```csv
+scenario,algorithm,makespan,states_explored,execution_time_ms,schedule_valid,status
+baseline_2w,ucs,11,15,0.2865999995265156,true,solved
+```
+
+`comparison.py` also checks that UCS is never worse than another solved row in the same scenario. If it is, the script stops with an error and writes nothing.
+
+## 5. The files by group
+
+### Data files
+
+| File | Content |
+|---|---|
+| `tasks.csv` | Four columns: `task_id`, `duration`, `depends_on`, `workers_required`. Rules are in `Data_Validation.md` section 3. |
+| `reference_schedule.csv` | Columns `task_id`, `worker_id`, `start_day`, `finish_day`. Read by `read_reference_schedule`. |
+| `comparison.csv` | Seven columns, one row per run. Timings change on every run. |
+
+### `data_validation.py` (Phase 1)
+
+Checks the CSV and computes lower bounds. Details are in [`Data_Validation.md`](Data_Validation.md).
+
+| Name | What it does |
+|---|---|
+| `Task` | One row of the CSV as a frozen object |
+| `DataValidationError` | The error raised for bad data (a kind of `ValueError`) |
+| `load_tasks(path, worker_capacity=2)` | Reads and checks the CSV, returns a dict of `Task` |
+| `validate_tasks(tasks, worker_capacity)` | Checks rules across all tasks, including cycles |
+| `combined_lower_bound(tasks, worker_capacity)` | Biggest of three lower bounds (11 for the baseline) |
+| `longest_after(task_id, tasks, followers, memo)` | Longest chain of work after a task. Used by `heuristics.py` |
+
+Run: `python data_validation.py tasks.csv --workers 2`
+
+### `scheduling_model.py` (Phase 1)
+
+Turns the tasks into a state model. Details are in [`Scheduling_Model.md`](Scheduling_Model.md).
+
+| Name | What it does |
+|---|---|
+| `State`, `Action`, `Successor` | Frozen objects for a snapshot, a step and one possible next step |
+| `initial_state()` | Nothing done, nothing running |
+| `ready_tasks(state, tasks)` | Tasks whose prerequisites are done |
+| `legal_start_sets(state, tasks, capacity)` | Every group of tasks that may start now |
+| `advance(state, started, tasks, capacity)` | Starts a group and jumps to the next finish |
+| `successors(state, tasks, capacity)` | All one-step moves |
+| `is_goal(state, tasks)` | True when all tasks are finished |
+| `validate_schedule(rows, tasks, capacity)` | Returns the total days if a schedule is valid, else raises `ValueError` |
+
+Run: `python scheduling_model.py tasks.csv --workers 2`. It looks for `reference_schedule.csv` in the same folder as the script.
+
+### `test_phase1.py` (Phase 1)
+
+26 tests for `data_validation.py` and `scheduling_model.py`. They read `tasks.csv` and `reference_schedule.csv`. Run: `python -m unittest -v test_phase1`
+
+### `search_common.py` (Phase 2)
+
+The code all four algorithms share.
+
+| Name | What it does |
+|---|---|
+| `best_first_search(algorithm, tasks, capacity, *, priority, reopen, ...)` | The one search loop |
+| `check_input(tasks, capacity)` | Returns `None` if fine, else an error text |
+| `reconstruct_schedule(actions)` | Builds start and finish days from the path |
+| `check_schedule(entries, tasks, capacity)` | Wraps `validate_schedule`, returns `(is_valid, error_text)` |
+| `find_violations(entries, tasks, capacity)` | Lists every problem in a schedule |
+| `make_result(...)` | Builds the result dict |
+
+It has four status values: `'solved'`, `'no solution'`, `'timeout'` and `'invalid input'`. It has no command line.
+
+### `heuristics.py` (Phase 2)
+
+Functions with the form `h(state, tasks, capacity)` that estimate the days still needed.
+
+| Name | What it returns |
+|---|---|
+| `zero_heuristic` | Always 0. The default for A* |
+| `longest_remaining` | Days left on the longest unfinished task. The default for Greedy. 4 at the start |
+| `critical_path_remaining` | Longest chain still ahead. 9 at the start |
+| `workload_remaining` | Worker-days left divided by workers, rounded up. 8 at the start |
+| `combined_heuristic` | The bigger of the last two |
+
+No file in the project passes the last three into `greedy_search` or `astar_search`. They are available to pass in through the `heuristic` argument. It has no command line.
+
+### The four algorithm files (Phase 2)
+
+| File | Function | Notes |
+|---|---|---|
+| `bfs.py` | `bfs_search(tasks, capacity, timeout_seconds=None)` | Fewest steps, not fewest days. Its makespan can be above 11 |
+| `ucs.py` | `ucs_search(tasks, capacity, timeout_seconds=None)` | Finds the minimum makespan |
+| `greedy.py` | `greedy_search(tasks, capacity, heuristic=None, timeout_seconds=None)` | Fast, no optimal guarantee |
+| `astar.py` | `astar_search(tasks, capacity, heuristic=None, timeout_seconds=None)` | Same answer as UCS with `zero_heuristic` |
+
+None of these files has a command line. Running `python bfs.py` prints nothing. Call the functions from Python or through `comparison.py`.
+
+### `results_io.py` (Phase 2)
+
+| Name | What it does |
+|---|---|
+| `COLUMNS` | The seven column names |
+| `write_results_csv(path, rows)` | Checks every row, then writes the file in one step |
+| `read_results_csv(path)` | Reads the file back into dicts |
+| `ResultsCsvError` | The error for any read or write problem |
+
+No file in the project calls `read_results_csv`. It has no command line.
+
+### `comparison.py` (Phase 2)
+
+Runs all four algorithms on six scenarios and writes `comparison.csv`.
+
+| Scenario | Tasks | Workers |
+|---|---|---|
+| `baseline_2w` | `tasks.csv` | 2 |
+| `baseline_1w` | `tasks.csv` | 1 |
+| `baseline_3w` | `tasks.csv` | 3 |
+| `baseline_t05_3days` | `tasks.csv` with T05 set to 3 days | 2 |
+| `independent_tasks` | 4 tasks, no dependencies | 2 |
+| `dependency_chain` | 4 tasks in a line | 2 |
+
+The modified and small datasets are written to a temporary folder and deleted afterwards. Run: `python comparison.py [--output comparison.csv]`
+
+## 6. How to run each part
+
+Run these from the project folder. On macOS and Linux use `python3` instead of `python`. On Windows, if you see encoding errors, run `$env:PYTHONIOENCODING='utf-8'` first. If a command fails for no clear reason, delete the `__pycache__` folder and try again. Old `.pyc` files caused false failures before.
+
+The outputs below were produced with Python 3.14.3 on Windows.
+
+### Validate the data
+
+```bash
+python data_validation.py tasks.csv --workers 2
+```
+
+```
+VALID: 6 tasks, 2 workers, all dependencies valid and acyclic.
+Lower bounds: critical path 9 days; worker workload 8 days.
+Parallel-split lower bound: 11 days (shared-prerequisite tasks split across workers).
+Combined lower bound: 11 days. A schedule of exactly this length is optimal; otherwise optimality is not proven.
+```
+
+### Run the model
+
+```bash
+python scheduling_model.py tasks.csv --workers 2
+```
+
+```
+Initial state: State(completed=frozenset(), running=())
+Initially ready: ('T01',)
+Initial legal choices: (('T01',),)
+State transitions for the reference schedule:
+Day  2: started=('T01',), finished=('T01',), running=(), completed=['T01']
+Day  5: started=('T02', 'T03'), finished=('T03',), running=(('T02', 1),), completed=['T01', 'T03']
+Day  6: started=('T04',), finished=('T02',), running=(('T04', 2),), completed=['T01', 'T02', 'T03']
+Day  8: started=(), finished=('T04',), running=(), completed=['T01', 'T02', 'T03', 'T04']
+Day 10: started=('T05',), finished=('T05',), running=(), completed=['T01', 'T02', 'T03', 'T04', 'T05']
+Day 11: started=('T06',), finished=('T06',), running=(), completed=['T01', 'T02', 'T03', 'T04', 'T05', 'T06']
+VALID reference schedule: 11 working days
+Lower bound 11 equals the schedule length, so it is optimal.
+```
+
+### Run the tests
+
+```bash
+python -m unittest -v test_phase1
+```
+
+The last lines are:
+
+```
+Ran 26 tests in 0.023s
+OK
+```
+
+### Run the algorithms
+
+The algorithm files have no command line, so call them from Python. This reads `tasks.csv` and writes no files:
+
+```python
+from data_validation import load_tasks
+from bfs import bfs_search
+from ucs import ucs_search
+from greedy import greedy_search
+from astar import astar_search
+
+tasks = load_tasks('tasks.csv', 2)
+for search in (bfs_search, ucs_search, greedy_search, astar_search):
+    r = search(tasks, 2)
+    print(r['algorithm'], r['status'], r['makespan'], r['states_explored'], r['schedule_valid'], r['transitions'])
+```
+
+```
+BFS solved 12 15 True 5
+UCS solved 11 15 True 6
+Greedy solved 12 5 True 5
+A* solved 11 15 True 6
+```
+
+BFS and Greedy find 12 days here, one more than the best. UCS and A* find 11.
+
+### Run the comparison
+
+```bash
+python comparison.py
+```
+
+This command rewrites `comparison.csv` in the folder where you run it. To try it without touching the project file, copy the `.py` files and the two input CSV files to another folder and run it there, or use `--output` with a new file name. I ran it in a temporary copy:
+
+```
+Wrote 24 rows to comparison.csv
+```
+
+The first rows of that output (the `execution_time_ms` values change on every run, the other columns did not):
+
+```
+scenario,algorithm,makespan,states_explored,execution_time_ms,schedule_valid,status
+baseline_2w,bfs,12,15,0.3591999993659556,true,solved
+baseline_2w,ucs,11,15,0.28520001797005534,true,solved
+baseline_2w,greedy,12,5,0.1894999877549708,true,solved
+baseline_2w,astar,11,15,0.3228000132367015,true,solved
+```
+
+## 7. What depends on what
+
+| If you change or remove | What happens |
+|---|---|
+| `Task` fields (rename or remove) | Breaks everything that reads tasks: `scheduling_model.py`, `heuristics.py`, `search_common.py`, the tests and the algorithms |
+| `data_validation.py` | Nothing else can load tasks. `scheduling_model.py`, `search_common.py`, `heuristics.py`, `test_phase1.py` and `comparison.py` all fail on import |
+| `longest_after` in `data_validation.py` | Breaks `heuristics.py`, so `greedy.py`, `astar.py` and `comparison.py` fail on import |
+| `tasks.csv` | Changes every result. The 11-day answer, the lower bound of 11 and `reference_schedule.csv` only fit the baseline. Several tests and `comparison.py` also read this file. Edit a copy instead |
+| `reference_schedule.csv` | Breaks the schedule replay in `scheduling_model.py` and the reference tests in `test_phase1.py`. The search code does not read it |
+| `scheduling_model.py` (`State`, `Action`, `successors`, `is_goal`, `validate_schedule`) | Changes the rules for every algorithm. `search_common.py` and `test_phase1.py` depend on these names |
+| `search_common.py` | Breaks all four algorithms and `comparison.py` |
+| `heuristics.py` | Breaks `greedy.py` and `astar.py`, and so `comparison.py`. `bfs.py` and `ucs.py` still work |
+| One algorithm file | Only that algorithm and `comparison.py` fail. The other algorithm files still work |
+| `results_io.py` | `comparison.py` cannot write its CSV |
+| `comparison.csv` | Only an output. Deleting it is harmless, and `python comparison.py` creates it again |
+
+## 8. Phase 2 status
+
+This compares the checklist in `Phase2_Requirements.md` section 9 with the folder. All boxes in that checklist are still unchecked in the file.
+
+| Item | Owner | Deliverable | In the folder? |
+|---|---|---|---|
+| P2.1 | JA | `bfs.py` | Yes |
+| P2.2 | JA | `ucs.py` | Yes |
+| P2.3 | JA | `greedy.py` | Yes |
+| P2.4 | JA | `astar.py` | Yes |
+| P2.5 | SB | `search_test_data/` | No |
+| P2.6 | SS | `Scheduling_Scenarios.md` | No |
+| P2.7 | JC, JA | `test_search.py` | No |
+| P2.7 | JC, JA | `comparison.csv` | Yes (made by `comparison.py`) |
+| P2.8 | All | Integrated, reviewed engine | Not stated in any file |
+
+Files in the folder that the checklist does not list: `search_common.py`, `heuristics.py`, `results_io.py`, `comparison.py`.
+
+## 9. Unclear points
+
+- The tests in `test_phase1.py` cover Phase 1 only. No test file covers the search code.
