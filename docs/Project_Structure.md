@@ -18,7 +18,7 @@ The project plans a small onboarding pilot with 6 tasks (T01 to T06) and 2 worke
 heuristic-project-scheduling/
   README.md
   docs/          Requirements, plan, model and analysis documents (.md)
-  data/          tasks.csv, reference_schedule.csv, heuristic_test_data/
+  data/          tasks.csv, reference_schedule.csv, search_test_data/, heuristic_test_data/
   results/       comparison.csv, heuristic_results.csv (generated)
   scheduling/    Library code: validation, model, search, heuristics, CSV readers/writers
   experiments/   Scripts: comparison, heuristic comparison, data generator, summary, demo
@@ -429,7 +429,7 @@ This compares the checklist in `Implementation_Plan.md` with the folder.
 | P2.2 | JA | `ucs.py` | Yes |
 | P2.3 | JA | `greedy.py` | Yes |
 | P2.4 | JA | `astar.py` | Yes |
-| P2.5 | SB | `search_test_data/` | No |
+| P2.5 | SB | `data/search_test_data/` | Yes |
 | P2.6 | SS | `Scheduling_Scenarios.md` | No |
 | P2.7 | JC, JA | `test_search.py` | Yes |
 | P2.7 | JC, JA | `comparison.csv` | Yes (made by `comparison.py`) |

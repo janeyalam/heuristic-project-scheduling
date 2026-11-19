@@ -1,0 +1,5 @@
+﻿task_id,duration,depends_on,workers_required
+T01,3,None,1
+T02,3,None,1
+T03,2,None,1
+T04,2,None,1

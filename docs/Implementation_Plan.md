@@ -42,7 +42,7 @@ This document says **who builds what, in what order, and what is done**. What th
 - [x] **P2.2 — JA:** UCS implementation complete (`ucs.py`).
 - [x] **P2.3 — JA:** Greedy Best-First implementation complete (`greedy.py`).
 - [x] **P2.4 — JA:** A* implementation complete (`astar.py`).
-- [ ] **P2.5 — SB:** Shared test datasets prepared (`search_test_data/`). *The folder does not exist yet.*
+- [x] **P2.5 — SB:** Shared test datasets prepared (`data/search_test_data/`). *6 hand-made CSVs and `NOTES.md`. `comparison.py` does not use them.*
 - [ ] **P2.6 — SS:** Scheduling scenarios documented (`Scheduling_Scenarios.md`). *The file does not exist yet.*
 - [x] **P2.7 — JC/JA:** Algorithm tests and comparison completed (`test_search.py`, `comparison.csv`).
 - [ ] **P2.8 — All:** Integrated search engine reviewed and working. *It works: `python -m unittest discover` runs 129 tests (including the Phase 3 tests), all passing. The team review is not recorded.*

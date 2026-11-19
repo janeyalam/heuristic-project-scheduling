@@ -20,7 +20,7 @@ On Windows use `python` (or `py`). On macOS and Linux use `python3` instead of `
 
 ```
 docs/          Requirements, plan, model and analysis documents
-data/          Input data (tasks.csv, reference_schedule.csv, heuristic_test_data/)
+data/          Input data (tasks.csv, reference_schedule.csv, search_test_data/, heuristic_test_data/)
 results/       Generated results (comparison.csv, heuristic_results.csv)
 scheduling/    Library code: validation, model, search, heuristics, CSV readers/writers
 experiments/   Scripts: comparisons, data generator, summary, demo
